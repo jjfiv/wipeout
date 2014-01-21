@@ -10,9 +10,11 @@ using std::vector;
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/nonfree/features2d.hpp>
 
+static float constexpr max(float a, float b) {
+  return (a > b) ? a : b;
+}
+
 static void processImage(string path) {
-  const int XN = 64;
-  const int YN = 48;
   const int XSz = 640;
   const int YSz = 480;
   
@@ -29,7 +31,9 @@ static void processImage(string path) {
 
   vector<cv::KeyPoint> keypoints;
 
-  const float diameter = XSz / XN;
+  const int XN = 64;
+  const int YN = 48;
+  const float diameter = max(4,XSz / XN);
   for(int x = 0; x < XN; x++) {
     for(int y = 0; y < YN; y++) {
       float xp = float(XSz) / float(x);
@@ -38,16 +42,17 @@ static void processImage(string path) {
       keypoints.push_back(cv::KeyPoint(xp, yp, diameter));
     }
   }
+  
 
-  //algorithm.detect(imgData, keypoints);
+  cv::SIFT surf;
+  //surf.detect(imgData, keypoints);
   std::cerr << keypoints.size() << " keypoints!\n";
-  cv::SURF surf;
   cv::Mat surf_desc;
   surf.compute(imgData, keypoints, surf_desc);
 
-  cv::FREAK freak;
-  cv::Mat freak_desc;
-  freak.compute(imgData, keypoints, freak_desc);
+  //cv::FREAK freak;
+  //cv::Mat freak_desc;
+  //freak.compute(imgData, keypoints, freak_desc);
   
   std::cerr << "Done computation!\n";
 
@@ -55,8 +60,8 @@ static void processImage(string path) {
   int featureId = 1;
   for(auto it = surf_desc.begin<double>(); it != surf_desc.end<double>(); ++it) {
     double val = *it;
-    if(int(val*10000) != 0) {
-      printf("%d:%1.7f ", featureId, *it);
+    if(int(val*100000) > 2) {
+      printf("%d:%1.5f ", featureId, *it);
     }
     featureId++;
   }
