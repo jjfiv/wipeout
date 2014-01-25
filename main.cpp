@@ -30,11 +30,55 @@ static cv::Mat siftVocab;
 static const int XSz = 320;
 static const int YSz = 240;
 
-void showMatInfo(cv::Mat &m) {
+string depthString(const cv::Mat &m) {
+  switch(m.depth()) {
+    case CV_8U: return "CV_8U";
+    case CV_8S: return "CV_8S";
+    case CV_16U: return "CV_16U";
+    case CV_16S: return "CV_16S";
+    case CV_32S: return "CV_32S";
+    case CV_32F: return "CV_32F";
+    case CV_64F: return "CV_64F";
+    default: break;
+  }
+  return "unk";
+}
+
+struct FeatureInfo {
+  FeatureInfo(int _rows, int _cols, int _depth) : rows(_rows), cols(_cols), depth(_depth) { }
+  int rows;
+  int cols;
+  int depth;
+};
+
+FeatureInfo freakInfo(108,64,8);
+FeatureInfo briskInfo(391,64,8);
+FeatureInfo orbInfo(54,64,8);
+
+void showMatInfo(const cv::Mat &m) {
   std::cout 
     << "dim: " << m.dims
+    << " depth:" << depthString(m) 
     << " r:" << m.rows 
     << " c:" << m.cols << "\n";
+}
+
+static void initKeypoints() {
+  const int XN = 32*2;
+  const int YN = 24*2;
+  const float diameter = max(2,XSz / XN);
+  for(int x = 0; x < XN; x++) {
+    for(int y = 0; y < YN; y++) {
+      float xp = float(XSz) / float(x);
+      float yp = float(YSz) / float(y);
+
+      keypoints.push_back(cv::KeyPoint(xp, yp, diameter));
+    }
+  }
+}
+
+static void init() {
+  initKeypoints();
 }
 
 static void processImage(string path) {
@@ -50,17 +94,6 @@ static void processImage(string path) {
   }
 
   if(keypoints.size() == 0) {
-    const int XN = 32*2;
-    const int YN = 24*2;
-    const float diameter = max(2,XSz / XN);
-    for(int x = 0; x < XN; x++) {
-      for(int y = 0; y < YN; y++) {
-        float xp = float(XSz) / float(x);
-        float yp = float(YSz) / float(y);
-
-        keypoints.push_back(cv::KeyPoint(xp, yp, diameter));
-      }
-    }
   }
   
 
@@ -74,8 +107,8 @@ static void processImage(string path) {
   //tmpkp = vector<cv::KeyPoint>(keypoints);
   //surf.compute(imgData, tmpkp, surf_desc);
   
-  //tmpkp = vector<cv::KeyPoint>(keypoints);
-  //orb.compute(imgData, tmpkp, orb_desc);
+  tmpkp = vector<cv::KeyPoint>(keypoints);
+  orb.compute(imgData, tmpkp, orb_desc);
   
   tmpkp = vector<cv::KeyPoint>(keypoints);
   freak.compute(imgData, tmpkp, freak_desc);
@@ -83,8 +116,8 @@ static void processImage(string path) {
   tmpkp = vector<cv::KeyPoint>(keypoints);
   brisk.compute(imgData, tmpkp, brisk_desc);
   
-  tmpkp = vector<cv::KeyPoint>(keypoints);
-  sift.compute(imgData, tmpkp, sift_desc);
+  //tmpkp = vector<cv::KeyPoint>(keypoints);
+  //sift.compute(imgData, tmpkp, sift_desc);
 
 
   std::cout << "surf "; showMatInfo(surf_desc);   
@@ -114,6 +147,8 @@ static void processImage(string path) {
 }
 
 int main(int argc, char **argv) {
+  init();
+
   vector<string> imgs;
   for(int i=1; i<argc; i++) {
     imgs.push_back(string(argv[i]));
