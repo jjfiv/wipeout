@@ -10,6 +10,11 @@ using std::vector;
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/nonfree/features2d.hpp>
 
+typedef unsigned char u8;
+
+static_assert(sizeof(u8) == sizeof(uchar), "u8=uchar");
+static_assert(sizeof(u8) == 1, "u8=1");
+
 static float constexpr max(float a, float b) {
   return (a > b) ? a : b;
 }
@@ -23,6 +28,26 @@ static cv::SIFT siftOp;
 
 static const int XSz = 320;
 static const int YSz = 240;
+
+static int _bitcount_cache[256] = {0};
+static int slow_bitcount(u8 n) {
+  int count = 0;
+  while(n) {
+    count += n & 1u;
+    n >>= 1;
+  }
+  return count;
+}
+static void initBitcount() {
+  for(int i=0; i<256; i++) {
+    _bitcount_cache[i] = slow_bitcount(i);
+  }
+}
+
+static int fast_bitcount(u8 n) {
+  return _bitcount_cache[n];
+}
+
 
 /*static string depthString(const cv::Mat &m) {
   switch(m.depth()) {
@@ -79,6 +104,7 @@ struct FeatureInfo {
   }
 };
 
+
 static FeatureInfo freakInfo(108,64,CV_8U);
 static FeatureInfo briskInfo(391,64,CV_8U);
 static FeatureInfo orbInfo(54,32,CV_8U);
@@ -110,20 +136,27 @@ static void initVocabularies() {
 }
 
 static vector<int> closestMatchTerms(cv::Mat desc, vector<cv::Mat> vocab) {
-  vector<int> bestMatch(desc.cols, -1);
-  vector<float> distance(desc.cols, 0.0f);
+  int cols = desc.cols;
+  int rows = desc.rows;
+
+  vector<int> bestMatch(cols, -1);
+  vector<int> distance(cols, 0);
 
   for(int i=0; i<(int)vocab.size(); i++) {
-    vector<cv::DMatch> matches;
-    //std::cout << "desc "; showMatInfo(desc);
-    //std::cout << "vocab[i] "; showMatInfo(vocab[i]);
-    bitMatcher.match(desc, vocab[i], matches);
+    for(int y=0; y<cols; y++) {
+      int thisColDistance = 0;
+      for(int x=0; x<rows; x++) {
+        u8 ai = desc.at<uchar>(x,y);
+        u8 bi = vocab[i].at<uchar>(x,y);
 
-    // for each matching orb descriptor, keep this vocab word if it is closest to that descriptor
-    for(int col=0; col<desc.cols; col++) {
-      if(bestMatch[col] == -1 || distance[col] < matches[col].distance) {
-        bestMatch[col] = i;
-        distance[col] = matches[col].distance;
+        // bit distance is xor of ai, bi
+        thisColDistance += fast_bitcount(ai ^ bi);
+      }
+
+      // keep this word if it's the best match so far
+      if(bestMatch[y] == -1 || thisColDistance < distance[y]) {
+        bestMatch[y] = i;
+        distance[y] = thisColDistance;
       }
     }
   }
@@ -132,6 +165,7 @@ static vector<int> closestMatchTerms(cv::Mat desc, vector<cv::Mat> vocab) {
 }
 
 static void init() {
+  initBitcount();
   initKeypoints();
   initVocabularies();
 }
