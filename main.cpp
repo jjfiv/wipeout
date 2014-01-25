@@ -8,6 +8,7 @@ using std::vector;
 
 #include <opencv2/core/core.hpp>
 #include <opencv2/ocl/ocl.hpp>
+#include <opencv2/ml/ml.hpp>
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/nonfree/features2d.hpp>
 
@@ -16,6 +17,10 @@ typedef unsigned char u8;
 static_assert(sizeof(u8) == sizeof(uchar), "u8=uchar");
 static_assert(sizeof(u8) == 1, "u8=1");
 
+template <class T>
+static T constexpr min(T a, T b) {
+  return (a < b) ? a : b;
+}
 static float constexpr max(float a, float b) {
   return (a > b) ? a : b;
 }
@@ -65,7 +70,7 @@ static int fast_bitcount(u8 n) {
 }*/
 
 /*static void showMatInfo(const cv::Mat &m) {
-  std::cout 
+  std::cerr 
     << "dim: " << m.dims
     << " depth:" << depthString(m) 
     << " r:" << m.rows 
@@ -132,13 +137,16 @@ static void initVocabularies() {
     cv::Mat orb = orbInfo.makeRandom(rng);
     orbVocab.push_back(orb);
   }
-  //std::cout << freakVocab[0].row(0) << "\n";
-  //std::cout << freakVocab[1].row(0) << "\n";
+  //std::cerr << freakVocab[0].row(0) << "\n";
+  //std::cerr << freakVocab[1].row(0) << "\n";
 }
 
 static vector<int> closestMatchTerms(cv::Mat desc, vector<cv::Mat> vocab) {
   int cols = desc.cols;
   int rows = desc.rows;
+
+  assert(desc.cols == vocab[0].cols);
+  assert(desc.rows == vocab[0].rows);
 
   vector<int> bestMatch(cols, -1);
   vector<int> distance(cols, 0);
@@ -228,7 +236,7 @@ vector<float> computeBOW(cv::Mat img) {
 
   vector<float> normFeatures(featureVector.size(), 0.0f);
   for(size_t i=0; i<featureVector.size(); i++) {
-    normFeatures[i] = float(featureVector[i])/float(featureSum);
+    normFeatures[i] = float(featureVector[i]); //float(featureSum);
   }
 
   return normFeatures;
@@ -262,6 +270,89 @@ static vector<string> slurpLines(const string &path) {
   return lines;
 }
 
+template <class T>
+static vector<T> subvec(const vector<T> &in, int start, int end) {
+  vector<T> result;
+  for(int i=start; i<end && i < in.size(); i++) {
+    result.push_back(in[i]);
+  }
+  return result;
+}
+
+template <class T>
+static vector<T> concat(const vector<T> &a, const vector<T> &b) {
+  vector<T> conc(a);
+  conc.reserve(a.size()+b.size());
+  for(const T& ai : a) {
+    conc.push_back(ai);
+  }
+  for(const T& bi : b) {
+    conc.push_back(bi);
+  }
+  return conc;
+}
+
+static void trainSVM(vector<vector<float>> pos, vector<vector<float>> neg, const char * modelPath) {
+  // default params taken from:
+  // http://docs.opencv.org/doc/tutorials/ml/introduction_to_svm/introduction_to_svm.html
+  CvSVMParams params;
+  params.svm_type = CvSVM::C_SVC;
+  params.kernel_type = CvSVM::LINEAR;
+  params.term_crit = cvTermCriteria(CV_TERMCRIT_ITER, 400, 1e-6);
+  params.degree = 5.0;
+  params.nu = 0.4;
+
+
+  const int dataPoints = pos.size() + neg.size();
+  const int dataWidth = pos.at(0).size();
+  const int numPos = pos.size();
+  const int numNeg = neg.size();
+
+  // set up labels; positive first
+  vector<float> labels(dataPoints, 0.0);
+  for(int i=0; i<numPos; i++) {
+    labels[i] = (float) 1;
+  }
+
+  cv::Mat training = cv::Mat::zeros(dataPoints, dataWidth, CV_32FC1);
+  for(int i=0; i<numPos; i++) {
+    for(int x=0; x<dataWidth; x++) {
+      training.at<float>(i,x) = pos[i][x];
+    }
+  }
+  for(int i=0; i<numNeg; i++) {
+    for(int x=0; x<dataWidth; x++) {
+      training.at<float>(i+numPos,x) = neg[i][x];
+    }
+  }
+
+  std::cerr << "Start train!\n";
+  // create and train
+  CvSVM svm;
+  svm.train(training, cv::Mat(labels), cv::Mat(), cv::Mat(), params);
+
+  //std::cerr << cv::Mat(labels) << "\n";
+
+  int posD = 0;
+  for(auto score : pos) {
+    posD += (int) (svm.predict(cv::Mat(score)) > 0);
+  }
+  std::cerr << "predict on train-pos: " << posD << "/" << pos.size() << "\n";
+  std::cerr << "End train!\n";
+  
+  svm.save(modelPath);
+}
+
+static void showPath(const char *title, string path) {
+  std::cout << "<img src=\"" << path << "\" /><br />\n";
+}
+
+struct Image {
+  Image(string p) : path(p) { }
+  string path;
+  vector<float> scores;
+};
+
 int main(int argc, char **argv) {
   init();
 
@@ -273,8 +364,8 @@ int main(int argc, char **argv) {
   vector<string> pos = slurpLines(argv[1]);
   vector<string> neg = slurpLines(argv[2]);
 
-  std::cout << pos.size() << " positives\n";
-  std::cout << neg.size() << " negatives\n";
+  std::cerr << pos.size() << " positives\n";
+  std::cerr << neg.size() << " negatives\n";
 
   vector<vector<float>> posd;
   vector<vector<float>> negd;
@@ -285,6 +376,50 @@ int main(int argc, char **argv) {
   for(string img : neg) {
     negd.push_back(processImage(img));
   }
+
+  //for(int numPos = 2; numPos < (posd.size() - 1); numPos++) {
+  {
+    const int numPos = 10;
+    const int numNeg = 200;
+    vector<vector<float>> trainPos = subvec(posd, 0, numPos);
+    vector<vector<float>> heldOutPos = subvec(posd, numPos, posd.size());
+
+    vector<vector<float>> trainNeg = subvec(negd, 0, numNeg);
+    vector<vector<float>> heldOutNeg = subvec(negd, numNeg, negd.size());
+
+    const char* const p2path = "p2.xml";
+    trainSVM(trainPos, trainNeg, p2path);
+    CvSVM p2;
+    p2.load(p2path);
+
+    vector<vector<float>> test = concat(heldOutPos, heldOutNeg);
+
+    int truePos = 0;
+    int falsePos = 0;
+    int rank = 0;
+    for(auto scores : test) {
+      float response = p2.predict(cv::Mat(scores));
+      if(rank < (heldOutPos.size())) {
+        truePos += (response > 0.5);
+        if(response > 0.5) {
+          showPath("detected!", pos[rank]);
+        }
+      } else {
+        falsePos += (response > 0.5);
+        if(response > 0.5) {
+          showPath("detected!", neg[rank-heldOutPos.size()]);
+        }
+      }
+      rank++;
+    }
+    std::cout 
+      << "truePos=" << truePos << "/" << heldOutPos.size() 
+      << " falsePos=" << falsePos << "/" << heldOutNeg.size() << "\n";
+  }
+  
+
+
+  
 
   /*
   vector<string> imgs;
