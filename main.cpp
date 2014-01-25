@@ -14,9 +14,30 @@ static float constexpr max(float a, float b) {
   return (a > b) ? a : b;
 }
 
+static vector<cv::KeyPoint> keypoints;
+static cv::BRISK brisk;
+static cv::ORB orb;
+static cv::FREAK freak;
+static cv::SURF surf;
+static cv::SIFT sift;
+
+static cv::Mat briskVocab;
+static cv::Mat orbVocab;
+static cv::Mat freakVocab;
+static cv::Mat surfVocab;
+static cv::Mat siftVocab;
+
+static const int XSz = 320;
+static const int YSz = 240;
+
+void showMatInfo(cv::Mat &m) {
+  std::cout 
+    << "dim: " << m.dims
+    << " r:" << m.rows 
+    << " c:" << m.cols << "\n";
+}
+
 static void processImage(string path) {
-  const int XSz = 640;
-  const int YSz = 480;
   
   cv::Mat imgData;
   {
@@ -27,36 +48,58 @@ static void processImage(string path) {
     }
     cv::resize(fullData, imgData, cv::Size(XSz,YSz));
   }
-  std::cerr << "Done loading & resizing!\n";
 
-  vector<cv::KeyPoint> keypoints;
+  if(keypoints.size() == 0) {
+    const int XN = 32*2;
+    const int YN = 24*2;
+    const float diameter = max(2,XSz / XN);
+    for(int x = 0; x < XN; x++) {
+      for(int y = 0; y < YN; y++) {
+        float xp = float(XSz) / float(x);
+        float yp = float(YSz) / float(y);
 
-  const int XN = 64;
-  const int YN = 48;
-  const float diameter = max(4,XSz / XN);
-  for(int x = 0; x < XN; x++) {
-    for(int y = 0; y < YN; y++) {
-      float xp = float(XSz) / float(x);
-      float yp = float(YSz) / float(y);
-
-      keypoints.push_back(cv::KeyPoint(xp, yp, diameter));
+        keypoints.push_back(cv::KeyPoint(xp, yp, diameter));
+      }
     }
   }
   
 
-  cv::SIFT surf;
-  //surf.detect(imgData, keypoints);
-  std::cerr << keypoints.size() << " keypoints!\n";
+  cv::Mat brisk_desc;
+  cv::Mat orb_desc;
+  cv::Mat freak_desc;
   cv::Mat surf_desc;
-  surf.compute(imgData, keypoints, surf_desc);
-
-  //cv::FREAK freak;
-  //cv::Mat freak_desc;
-  //freak.compute(imgData, keypoints, freak_desc);
+  cv::Mat sift_desc;
   
-  std::cerr << "Done computation!\n";
+  vector<cv::KeyPoint> tmpkp;
+  //tmpkp = vector<cv::KeyPoint>(keypoints);
+  //surf.compute(imgData, tmpkp, surf_desc);
+  
+  //tmpkp = vector<cv::KeyPoint>(keypoints);
+  //orb.compute(imgData, tmpkp, orb_desc);
+  
+  tmpkp = vector<cv::KeyPoint>(keypoints);
+  freak.compute(imgData, tmpkp, freak_desc);
+  
+  tmpkp = vector<cv::KeyPoint>(keypoints);
+  brisk.compute(imgData, tmpkp, brisk_desc);
+  
+  tmpkp = vector<cv::KeyPoint>(keypoints);
+  sift.compute(imgData, tmpkp, sift_desc);
 
-  printf("0 qid:0 ");
+
+  std::cout << "surf "; showMatInfo(surf_desc);   
+  std::cout << "sift "; showMatInfo(sift_desc);   
+  std::cout << "orb "; showMatInfo(orb_desc);     
+  std::cout << "freak "; showMatInfo(freak_desc); 
+  std::cout << "brisk "; showMatInfo(brisk_desc); 
+  //
+  //std::cout << surf_desc.row(0);
+  //std::cout << sift_desc.row(0);
+  //std::cout << orb_desc.row(0);
+  //std::cout << freak_desc.row(0);
+  //std::cout << brisk_desc.row(0);
+  
+  /*printf("0 qid:0 ");
   int featureId = 1;
   for(auto it = surf_desc.begin<double>(); it != surf_desc.end<double>(); ++it) {
     double val = *it;
@@ -64,10 +107,10 @@ static void processImage(string path) {
       printf("%d:%1.5f ", featureId, *it);
     }
     featureId++;
-  }
+  }*/
   printf("# buddy\n");
 
-  std::cerr << "Wrote " << (featureId-1) << " features!\n";
+  //std::cerr << "Wrote " << (featureId-1) << " features!\n";
 }
 
 int main(int argc, char **argv) {
@@ -77,7 +120,6 @@ int main(int argc, char **argv) {
   }
 
   for(const string& img : imgs) {
-    std::cerr << "process img: " << img << "\n";
     processImage(img);
   }
   
