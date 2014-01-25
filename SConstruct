@@ -5,7 +5,7 @@ OpenCVPkgConfigDir = OpenCVInstallDir+"/lib/pkgconfig/"
 
 env = Environment()
 #env["CXX"] = "clang++"
-env.Append(CXXFLAGS=['-std=c++11', '-O0', '-Wall', '-Werror', '-g'])
+env.Append(CXXFLAGS=['-std=c++11', '-O0', '-Wall', '-g'])
 #env.Append(CXXFLAGS=['-lto'])
 
 #env.Append(CXXFLAGS=['-pg'])

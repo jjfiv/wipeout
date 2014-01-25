@@ -2,6 +2,7 @@
 #include <string>
 #include <cstdio>
 #include <vector>
+#include <fstream>
 using std::string;
 using std::vector;
 
@@ -131,8 +132,8 @@ static void initVocabularies() {
     cv::Mat orb = orbInfo.makeRandom(rng);
     orbVocab.push_back(orb);
   }
-  std::cout << freakVocab[0].row(0) << "\n";
-  std::cout << freakVocab[1].row(0) << "\n";
+  //std::cout << freakVocab[0].row(0) << "\n";
+  //std::cout << freakVocab[1].row(0) << "\n";
 }
 
 static vector<int> closestMatchTerms(cv::Mat desc, vector<cv::Mat> vocab) {
@@ -182,85 +183,110 @@ static cv::Mat loadImage(string path) {
   return imgData;
 }
 
-struct ImgDesc {
+vector<float> computeBOW(cv::Mat img) {
   cv::Mat brisk;
   cv::Mat orb;
   cv::Mat freak;
   cv::Mat surf;
   cv::Mat sift;
 
-  vector<float> compute(cv::Mat img) {
-    vector<cv::KeyPoint> tmpkp;
-    vector<int> terms;
-    
-    //tmpkp = vector<cv::KeyPoint>(keypoints);
-    //surfOp.compute(img, tmpkp, surf);
-    //
-    vector<int> featureVector(VOCAB_SIZE*3, 0.0f);
-    int featureSum = 0;
+  vector<cv::KeyPoint> tmpkp;
+  vector<int> terms;
 
-    tmpkp = vector<cv::KeyPoint>(keypoints);
-    orbOp.compute(img, tmpkp, orb);
-    terms = closestMatchTerms(orb, orbVocab);
-    for(int idx : terms) {
-      ++featureVector[idx];
-      ++featureSum;
-    }
+  //tmpkp = vector<cv::KeyPoint>(keypoints);
+  //surfOp.compute(img, tmpkp, surf);
+  //
+  vector<int> featureVector(VOCAB_SIZE*3, 0.0f);
+  int featureSum = 0;
 
-    tmpkp = vector<cv::KeyPoint>(keypoints);
-    freakOp.compute(img, tmpkp, freak);
-    terms = closestMatchTerms(freak, freakVocab);
-    for(int idx : terms) {
-      ++featureVector[idx+VOCAB_SIZE];
-      ++featureSum;
-    }
-
-    tmpkp = vector<cv::KeyPoint>(keypoints);
-    briskOp.compute(img, tmpkp, brisk);
-    terms = closestMatchTerms(brisk, briskVocab);
-    for(int idx : terms) {
-      ++featureVector[idx+2*VOCAB_SIZE];
-      ++featureSum;
-    }
-
-    //tmpkp = vector<cv::KeyPoint>(keypoints);
-    //siftOp.compute(img, tmpkp, sift);
-    
-    vector<float> normFeatures(featureVector.size(), 0.0f);
-    for(size_t i=0; i<featureVector.size(); i++) {
-      normFeatures[i] = float(featureVector[i])/float(featureSum);
-    }
-
-    return normFeatures;
+  tmpkp = vector<cv::KeyPoint>(keypoints);
+  orbOp.compute(img, tmpkp, orb);
+  terms = closestMatchTerms(orb, orbVocab);
+  for(int idx : terms) {
+    ++featureVector[idx];
+    ++featureSum;
   }
-};
 
-static void processImage(string path) {
+  tmpkp = vector<cv::KeyPoint>(keypoints);
+  freakOp.compute(img, tmpkp, freak);
+  terms = closestMatchTerms(freak, freakVocab);
+  for(int idx : terms) {
+    ++featureVector[idx+VOCAB_SIZE];
+    ++featureSum;
+  }
+
+  tmpkp = vector<cv::KeyPoint>(keypoints);
+  briskOp.compute(img, tmpkp, brisk);
+  terms = closestMatchTerms(brisk, briskVocab);
+  for(int idx : terms) {
+    ++featureVector[idx+2*VOCAB_SIZE];
+    ++featureSum;
+  }
+
+  //tmpkp = vector<cv::KeyPoint>(keypoints);
+  //siftOp.compute(img, tmpkp, sift);
+
+  vector<float> normFeatures(featureVector.size(), 0.0f);
+  for(size_t i=0; i<featureVector.size(); i++) {
+    normFeatures[i] = float(featureVector[i])/float(featureSum);
+  }
+
+  return normFeatures;
+}
+
+static vector<float> processImage(string path) {
   cv::Mat imgData = loadImage(path);
 
   if(imgData.empty()) {
-    std::cerr << "Image " << path << " is empty, skipping.\n";
+    std::cerr << "Image `" << path << "' is empty, skipping.\n";
+    return vector<float>();
   }
 
-  ImgDesc desc;
-  vector<float> scores = desc.compute(imgData);
+  vector<float> scores = computeBOW(imgData);
+  return scores;
+}
 
-  printf("0 qid:0 ");
-  int featureId = 1;
-  for(float x : scores) {
-    if(x > 0) {
-      printf("%d:%1.5f ", featureId, x);
+static vector<string> slurpLines(const string &path) {
+  vector<string> lines;
+  std::ifstream fp;
+  fp.open(path);
+
+  while(fp) {
+    string line;
+    std::getline(fp, line);
+    if(line.size()) {
+      lines.push_back(line);
     }
-    featureId++;
   }
-  printf("# %s\n", path.c_str());
 
-  //std::cerr << "Wrote " << (featureId-1) << " features!\n";
+  return lines;
 }
 
 int main(int argc, char **argv) {
   init();
 
+  if(argc != 3) {
+    std::cerr << "Expected positive.list negatives.list\n";
+    return -1;
+  }
+
+  vector<string> pos = slurpLines(argv[1]);
+  vector<string> neg = slurpLines(argv[2]);
+
+  std::cout << pos.size() << " positives\n";
+  std::cout << neg.size() << " negatives\n";
+
+  vector<vector<float>> posd;
+  vector<vector<float>> negd;
+
+  for(string img : pos) {
+    posd.push_back(processImage(img));
+  }
+  for(string img : neg) {
+    negd.push_back(processImage(img));
+  }
+
+  /*
   vector<string> imgs;
   for(int i=1; i<argc; i++) {
     imgs.push_back(string(argv[i]));
@@ -269,6 +295,7 @@ int main(int argc, char **argv) {
   for(const string& img : imgs) {
     processImage(img);
   }
+  */
   
 }
 
