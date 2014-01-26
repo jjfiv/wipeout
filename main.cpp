@@ -27,7 +27,7 @@ static float constexpr max(float a, float b) {
 
 static vector<cv::KeyPoint> keypoints;
 static cv::BRISK briskOp;
-static cv::ORB orbOp;
+static cv::ORB orbOp(500, 1.2f, 8, 16);
 static cv::FREAK freakOp;
 static cv::SURF surfOp;
 static cv::SIFT siftOp;
@@ -80,17 +80,26 @@ static int fast_bitcount(u8 n) {
 static cv::BFMatcher bitMatcher(cv::NORM_HAMMING);
 
 static void initKeypoints() {
-  const int XN = 32*2;
-  const int YN = 24*2;
-  const float diameter = max(2,XSz / XN);
-  for(int x = 0; x < XN; x++) {
-    for(int y = 0; y < YN; y++) {
-      float xp = float(XSz) / float(x);
-      float yp = float(YSz) / float(y);
+  //const int XN = 32*2;
+  //const int YN = 24*2;
+  //const float diameter = max(2,XSz / XN);
+  //for(int x = 0; x < XN; x++) {
+  //  for(int y = 0; y < YN; y++) {
+  //    float xp = float(XSz) / float(x);
+  //    float yp = float(YSz) / float(y);
 
-      keypoints.push_back(cv::KeyPoint(xp, yp, diameter));
-    }
+  //    keypoints.push_back(cv::KeyPoint(xp, yp, diameter));
+  //  }
+  //}
+
+  cv::RNG rng(0xdeadbeef);
+  for(int n=0; n<2000; n++) {
+    float x = rng.uniform(0,XSz);
+    float y = rng.uniform(0,YSz);
+    keypoints.push_back(cv::KeyPoint(x, y, rng.uniform(1.0f, 5.0f)));
   }
+
+  std::cerr << "init " << keypoints.size() << " keypoints!\n";
 }
 
 struct FeatureInfo {
@@ -110,16 +119,15 @@ struct FeatureInfo {
   }
 };
 
-
-static FeatureInfo freakInfo(108,64,CV_8U);
-static FeatureInfo briskInfo(391,64,CV_8U);
-static FeatureInfo orbInfo(54,32,CV_8U);
+static FeatureInfo freakInfo(1376,64,CV_8U);
+static FeatureInfo briskInfo(1631,64,CV_8U);
+static FeatureInfo orbInfo(1559,32,CV_8U);
 
 static vector<cv::Mat> freakVocab;
 static vector<cv::Mat> briskVocab;
 static vector<cv::Mat> orbVocab;
 
-const int VOCAB_SIZE = 64;
+const int VOCAB_SIZE = 1024;
 
 static void initVocabularies() {
   cv::RNG rng(0xdeadbeef);
@@ -146,26 +154,30 @@ static vector<int> closestMatchTerms(cv::Mat desc, vector<cv::Mat> vocab) {
   int rows = desc.rows;
 
   assert(desc.cols == vocab[0].cols);
+  if(desc.rows != vocab[0].rows) {
+    std::cerr << "desc.rows: " << desc.rows << "\n";
+    std::cerr << "vocab[0].rows: " << vocab[0].rows << "\n";
+  }
   assert(desc.rows == vocab[0].rows);
 
-  vector<int> bestMatch(cols, -1);
-  vector<int> distance(cols, 0);
+  vector<int> bestMatch(rows, -1);
+  vector<int> distance(rows, 0);
 
   for(int i=0; i<(int)vocab.size(); i++) {
-    for(int y=0; y<cols; y++) {
-      int thisColDistance = 0;
-      for(int x=0; x<rows; x++) {
+    for(int x=0; x<rows; x++) {
+      int thisRowDistance = 0;
+      for(int y=0; y<cols; y++) {
         u8 ai = desc.at<uchar>(x,y);
         u8 bi = vocab[i].at<uchar>(x,y);
 
         // bit distance is xor of ai, bi
-        thisColDistance += fast_bitcount(ai ^ bi);
+        thisRowDistance += fast_bitcount(ai ^ bi);
       }
 
       // keep this word if it's the best match so far
-      if(bestMatch[y] == -1 || thisColDistance < distance[y]) {
-        bestMatch[y] = i;
-        distance[y] = thisColDistance;
+      if(bestMatch[x] == -1 || thisRowDistance < distance[x]) {
+        bestMatch[x] = i;
+        distance[x] = thisRowDistance;
       }
     }
   }
@@ -207,21 +219,21 @@ vector<float> computeBOW(cv::Mat img) {
   vector<int> featureVector(VOCAB_SIZE*3, 0.0f);
   int featureSum = 0;
 
-  tmpkp = vector<cv::KeyPoint>(keypoints);
-  orbOp.compute(img, tmpkp, orb);
-  terms = closestMatchTerms(orb, orbVocab);
-  for(int idx : terms) {
-    ++featureVector[idx];
-    ++featureSum;
-  }
+  //tmpkp = vector<cv::KeyPoint>(keypoints);
+  //orbOp.compute(img, tmpkp, orb);
+  //terms = closestMatchTerms(orb, orbVocab);
+  //for(int idx : terms) {
+  //  ++featureVector[idx];
+  //  ++featureSum;
+  //}
 
-  tmpkp = vector<cv::KeyPoint>(keypoints);
-  freakOp.compute(img, tmpkp, freak);
-  terms = closestMatchTerms(freak, freakVocab);
-  for(int idx : terms) {
-    ++featureVector[idx+VOCAB_SIZE];
-    ++featureSum;
-  }
+  //tmpkp = vector<cv::KeyPoint>(keypoints);
+  //freakOp.compute(img, tmpkp, freak);
+  //terms = closestMatchTerms(freak, freakVocab);
+  //for(int idx : terms) {
+  //  ++featureVector[idx+VOCAB_SIZE];
+  //  ++featureSum;
+  //}
 
   tmpkp = vector<cv::KeyPoint>(keypoints);
   briskOp.compute(img, tmpkp, brisk);
@@ -234,9 +246,16 @@ vector<float> computeBOW(cv::Mat img) {
   //tmpkp = vector<cv::KeyPoint>(keypoints);
   //siftOp.compute(img, tmpkp, sift);
 
+  int max = 0;
+  for(int ft : featureVector) {
+    if(ft > max) {
+      max = ft;
+    }
+  }
+  //std::cerr << "featureSum: " << featureSum << "\n";
   vector<float> normFeatures(featureVector.size(), 0.0f);
   for(size_t i=0; i<featureVector.size(); i++) {
-    normFeatures[i] = float(featureVector[i]); //float(featureSum);
+    normFeatures[i] = 10.0f *(float(featureVector[i]) / float(max)); //float(featureSum);
   }
 
   return normFeatures;
@@ -298,9 +317,8 @@ static void trainSVM(vector<vector<float>> pos, vector<vector<float>> neg, const
   CvSVMParams params;
   params.svm_type = CvSVM::C_SVC;
   params.kernel_type = CvSVM::LINEAR;
-  params.term_crit = cvTermCriteria(CV_TERMCRIT_ITER, 400, 1e-6);
-  params.degree = 5.0;
-  params.nu = 0.4;
+  params.term_crit = cvTermCriteria(CV_TERMCRIT_ITER, 4000, 1e-6);
+  params.C = 30;
 
 
   const int dataPoints = pos.size() + neg.size();
@@ -311,7 +329,7 @@ static void trainSVM(vector<vector<float>> pos, vector<vector<float>> neg, const
   // set up labels; positive first
   vector<float> labels(dataPoints, 0.0);
   for(int i=0; i<numPos; i++) {
-    labels[i] = (float) 1;
+    labels[i] = (float) i;
   }
 
   cv::Mat training = cv::Mat::zeros(dataPoints, dataWidth, CV_32FC1);
@@ -379,8 +397,8 @@ int main(int argc, char **argv) {
 
   //for(int numPos = 2; numPos < (posd.size() - 1); numPos++) {
   {
-    const int numPos = 10;
-    const int numNeg = 200;
+    const int numPos = 15;
+    const int numNeg = 75;
     vector<vector<float>> trainPos = subvec(posd, 0, numPos);
     vector<vector<float>> heldOutPos = subvec(posd, numPos, posd.size());
 
